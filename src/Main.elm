@@ -143,13 +143,13 @@ modal model =
     elem = 
         if model.showModal
           then
-            div [class "tab-modal"]
+            div [class "game-over-modal"]
                 [
-                div [ class "tab-modal-content"]
+                div [ class "game-over-modal-content"]
                     [
                       span [ class "close-tab", onClick CloseModal]
                            [text "×"]
-                    , div [ class "modal-content-holder"]
+                    , div [ class "game-over-modal-content-holder"]
                          [ text model.message]
                     ]
                  ]
