@@ -46,7 +46,7 @@ questionDecoder =
 --init model
 init : Json.Decode.Value -> (Model, Cmd Msg)
 init questions =
-  (Model (getQuestions questions) 1 True [] False "", get15Randoms)
+  (Model (getQuestions questions) 1 [] False "", get15Randoms)
 
 
 getQuestions : Json.Decode.Value -> List QuestionToAnswer
