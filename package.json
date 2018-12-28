@@ -1,7 +1,7 @@
 {
   "name": "Who wants to be a millionaire",
   "version": "1.0.0",
-  "description": "",
+  "description": "Who wants to be a millionaire game",
   "main": "bundle.js",
   "devDependencies": {
     "clear": "0.0.1",

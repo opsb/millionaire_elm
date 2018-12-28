@@ -17,7 +17,6 @@ type alias Model =
     {
        questionsToAnswer: List QuestionToAnswer
      , currentQuestion: Int
-     , initializeGame: Bool
      , questions: List Int
      , showModal: Bool
      , message: String
