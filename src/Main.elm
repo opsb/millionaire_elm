@@ -6,7 +6,9 @@ import Html exposing (Html, button, div, span, text)
 import Html.Attributes exposing (class, classList)
 import Html.Events exposing (onClick)
 import Json.Decode exposing (Decoder, array, decodeValue, field, list, map6, string)
+import List.Extra
 import Random
+import Random.List
 
 
 main =
@@ -17,13 +19,23 @@ main =
 -- MODEL
 
 
-type alias Model =
-    { questionsToAnswer : List QuestionToAnswer
-    , currentQuestion : Int
-    , questions : List Int
-    , showModal : Bool
-    , message : String
+type Model
+    = InvalidQuestions
+    | PreparingQuiz (List QuestionToAnswer)
+    | PlayingQuiz (List QuestionToAnswer) Quiz
+
+
+type alias Quiz =
+    { currentQuestion : Int
+    , questions : List QuestionToAnswer
+    , state : QuizState
     }
+
+
+type QuizState
+    = Playing
+    | Lost
+    | Won
 
 
 type alias QuestionToAnswer =
@@ -52,23 +64,29 @@ questionDecoder =
 
 
 init : Json.Decode.Value -> ( Model, Cmd Msg )
-init questions =
-    ( Model (getQuestions questions) 1 [] False "", get15Randoms )
-
-
-getQuestions : Json.Decode.Value -> List QuestionToAnswer
-getQuestions questions =
-    case decodeValue (list questionDecoder) questions of
-        Ok question ->
-            question
+init json =
+    case decodeValue (list questionDecoder) json of
+        Ok questions ->
+            ( PreparingQuiz questions, buildQuiz questions )
 
         Err error ->
-            []
+            ( InvalidQuestions, Cmd.none )
 
 
-get15Randoms : Cmd Msg
-get15Randoms =
-    Random.generate RndGen (Random.int 0 106)
+buildQuiz : List QuestionToAnswer -> Cmd Msg
+buildQuiz questions =
+    questions
+        |> Random.List.shuffle
+        |> Random.map (List.take 15)
+        |> Random.generate QuizBuilt
+
+
+initQuiz : List QuestionToAnswer -> Quiz
+initQuiz questions =
+    { currentQuestion = 1
+    , questions = questions
+    , state = Playing
+    }
 
 
 
@@ -86,56 +104,60 @@ subscriptions model =
 
 type Msg
     = Answer String
-    | RndGen Int
+    | QuizBuilt (List QuestionToAnswer)
     | CloseModal
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        Answer ans ->
-            ( checkAnswer model ans, Cmd.none )
+    case ( msgm, model ) of
+        ( QuizBuilt questions, PreparingQuiz allQuestions ) ->
+            ( PlayingQuiz allQuestions (Quiz 0 questions Playing)
+            , Cmd.none
+            )
 
-        RndGen rndGen ->
-            if List.length model.questions < 15 then
-                if List.member rndGen model.questions then
-                    ( model, get15Randoms )
-
-                else
-                    ( { model | questions = rndGen :: model.questions }, get15Randoms )
+        ( Answer ans, PlayingQuiz allQuestions quiz ) ->
+            if isCorrect ans quiz then
+                ( PlayingQuiz allQuestions (advanceQuestion quiz)
+                , Cmd.none
+                )
 
             else
-                ( model, Cmd.none )
+                ( PlayingQuiz allQuestions { quiz | state = Lost }
+                , Cmd.none
+                )
 
-        CloseModal ->
-            ( { model | showModal = False, currentQuestion = 1, questions = [] }, get15Randoms )
+        ( CloseModal, PlayingQuiz allQuestions quiz ) ->
+            ( PreparingQuiz allQuestions
+            , buildQuiz allQuestions
+            )
 
-
-checkAnswer model ans =
-    if .answer (extractQuestions model) == ans then
-        if model.currentQuestion >= 15 then
-            composeMsg model
-
-        else
-            { model | currentQuestion = model.currentQuestion + 1 }
-
-    else
-        composeMsg model
+        _ ->
+            ( model, Cmd.none )
 
 
-composeMsg : Model -> Model
-composeMsg model =
-    if model.currentQuestion == 15 then
-        { model | showModal = True, message = "Game over!!! You won the ultimate prize €1,000,000" }
-
-    else if model.currentQuestion < 15 && model.currentQuestion >= 10 then
-        { model | showModal = True, message = "Game over!!! You won €32,000" }
-
-    else if model.currentQuestion < 10 && model.currentQuestion >= 5 then
-        { model | showModal = True, message = "Game over!!! You won €1,000" }
+advanceQuestion : Quiz -> Quiz
+advanceQuestion quiz =
+    if quiz.currentQuestion >= 15 then
+        { quiz | state = Won }
 
     else
-        { model | showModal = True, message = "Game over!!! You won €100" }
+        { quiz | currentQuestion = quiz.currentQuestion + 1 }
+
+
+isCorrect : String -> Quiz -> Bool
+isCorrect ans quiz =
+    case currentQuestion quiz of
+        Just question ->
+            question.answer == ans
+
+        Nothing ->
+            False
+
+
+currentQuestion : Quiz -> Maybe QuestionToAnswer
+currentQuestion quiz =
+    List.Extra.getAt quiz.currentQuestion quiz.questions
 
 
 
@@ -144,60 +166,103 @@ composeMsg model =
 
 view : Model -> Html Msg
 view model =
-    div [ class "container" ]
-        [ div [ class "row" ]
-            [ div [ class "col-xs-12 main" ]
-                [ div [ class "row" ]
-                    [ avatarSection model
-                    , prizeSection model
-                    ]
-                , div [ class "row" ]
-                    [ lifeLineSection model
-                    ]
-                , div [ class "row" ]
-                    [ answerSection model
-                    ]
+    case model of
+        InvalidQuestions ->
+            text "invalid questions"
+
+        PreparingQuiz questions ->
+            text "preparing quiz"
+
+        PlayingQuiz questions quiz ->
+            gameView quiz
+
+
+gameView : Quiz -> Html Msg
+gameView quiz =
+    case quiz.state of
+        Playing ->
+            layout
+                [ quizView quiz ]
+
+        Won ->
+            layout
+                [ quizView quiz
+                , modal "Game over!!! You won the ultimate prize €1,000,000"
                 ]
+
+        Lost ->
+            layout
+                [ quizView quiz
+                , modal (gameOverMessage quiz)
+                ]
+
+
+gameOverMessage : Quiz -> String
+gameOverMessage quiz =
+    if quiz.currentQuestion < 5 then
+        "Game over!!! You won €100"
+
+    else if quiz.currentQuestion < 10 then
+        "Game over!!! You won €1,000"
+
+    else
+        "Game over!!! You won €32,000"
+
+
+layout : List (Html Msg) -> Html Msg
+layout body =
+    div [ class "container" ] body
+
+
+quizView : Quiz -> Html Msg
+quizView quiz =
+    div [ class "row" ]
+        [ div [ class "col-xs-12 main" ]
+            [ div [ class "row" ]
+                [ avatarSection
+                , prizeSection quiz
+                ]
+            , div [ class "row" ]
+                [ lifeLineSection
+                ]
+            , case List.Extra.getAt quiz.currentQuestion quiz.questions of
+                Just question ->
+                    div [ class "row" ]
+                        [ answerSection question
+                        ]
+
+                Nothing ->
+                    text ""
             ]
-        , div []
-            [ modal model ]
         ]
 
 
-modal : Model -> Html Msg
-modal model =
-    let
-        elem =
-            if model.showModal then
-                div [ class "game-over-modal" ]
-                    [ div [ class "game-over-modal-content" ]
-                        [ span [ class "close-tab", onClick CloseModal ]
-                            [ text "×" ]
-                        , div [ class "game-over-modal-content-holder" ]
-                            [ text model.message ]
-                        ]
-                    ]
-
-            else
-                div [] []
-    in
-    elem
+modal : String -> Html Msg
+modal message =
+    div [ class "game-over-modal" ]
+        [ div [ class "game-over-modal-content" ]
+            [ span [ class "close-tab", onClick CloseModal ]
+                [ text "×" ]
+            , div [ class "game-over-modal-content-holder" ]
+                [ text message ]
+            ]
+        ]
 
 
-avatarSection : Model -> Html msg
-avatarSection model =
+avatarSection : Html msg
+avatarSection =
     div [ class "avatar col-xs-offset-1 col-xs-6" ]
         []
 
 
-prizeSection : Model -> Html msg
-prizeSection model =
+prizeSection : Quiz -> Html msg
+prizeSection quiz =
     div [ class "prizes col-xs-4" ]
         [ div
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 15 )
+                , ( "current-prize", quiz.currentQuestion == 15 )
                 , ( "_15", True )
                 ]
             ]
@@ -206,7 +271,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 14 )
+                , ( "current-prize", quiz.currentQuestion == 14 )
                 , ( "_14", True )
                 ]
             ]
@@ -215,7 +280,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 13 )
+                , ( "current-prize", quiz.currentQuestion == 13 )
                 , ( "_13", True )
                 ]
             ]
@@ -224,7 +289,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 12 )
+                , ( "current-prize", quiz.currentQuestion == 12 )
                 , ( "_12", True )
                 ]
             ]
@@ -233,7 +298,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 11 )
+                , ( "current-prize", quiz.currentQuestion == 11 )
                 , ( "_11", True )
                 ]
             ]
@@ -242,7 +307,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 10 )
+                , ( "current-prize", quiz.currentQuestion == 10 )
                 , ( "_10", True )
                 ]
             ]
@@ -251,7 +316,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 9 )
+                , ( "current-prize", quiz.currentQuestion == 9 )
                 , ( "_9", True )
                 ]
             ]
@@ -260,7 +325,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 8 )
+                , ( "current-prize", quiz.currentQuestion == 8 )
                 , ( "_8", True )
                 ]
             ]
@@ -269,7 +334,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 7 )
+                , ( "current-prize", quiz.currentQuestion == 7 )
                 , ( "_7", True )
                 ]
             ]
@@ -278,7 +343,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 6 )
+                , ( "current-prize", quiz.currentQuestion == 6 )
                 , ( "_6", True )
                 ]
             ]
@@ -287,7 +352,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 5 )
+                , ( "current-prize", quiz.currentQuestion == 5 )
                 , ( "_5", True )
                 ]
             ]
@@ -296,7 +361,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 4 )
+                , ( "current-prize", quiz.currentQuestion == 4 )
                 , ( "_4", True )
                 ]
             ]
@@ -305,7 +370,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 3 )
+                , ( "current-prize", quiz.currentQuestion == 3 )
                 , ( "_3", True )
                 ]
             ]
@@ -314,7 +379,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 2 )
+                , ( "current-prize", quiz.currentQuestion == 2 )
                 , ( "_2", True )
                 ]
             ]
@@ -323,7 +388,7 @@ prizeSection model =
             [ classList
                 [ ( "row", True )
                 , ( "prize", True )
-                , ( "current-prize", model.currentQuestion == 1 )
+                , ( "current-prize", quiz.currentQuestion == 1 )
                 , ( "_1", True )
                 ]
             ]
@@ -331,50 +396,49 @@ prizeSection model =
         ]
 
 
-lifeLineSection : Model -> Html msg
-lifeLineSection model =
+lifeLineSection : Html msg
+lifeLineSection =
     div [ class "lifeLine" ]
         []
 
 
-answerSection : Model -> Html Msg
-answerSection model =
+answerSection : QuestionToAnswer -> Html Msg
+answerSection question =
     div [ class "answers col-xs-12" ]
         [ div [ class "row" ]
             [ div [ class "question" ]
-                [ text (.question (extractQuestions model)) ]
+                [ text question.question ]
             ]
         , div [ class "row" ]
             [ div [ class "answer a", onClick (Answer "A") ]
-                [ text (.a (extractQuestions model)) ]
+                [ text question.a ]
             , div [ class "answer b", onClick (Answer "B") ]
-                [ text (.b (extractQuestions model)) ]
+                [ text question.b ]
             , div [ class "answer c", onClick (Answer "C") ]
-                [ text (.c (extractQuestions model)) ]
+                [ text question.c ]
             , div [ class "answer d", onClick (Answer "D") ]
-                [ text (.d (extractQuestions model)) ]
+                [ text question.d ]
             ]
         ]
 
 
-extractQuestions : Model -> QuestionToAnswer
-extractQuestions model =
-    case
-        model.questions
-            |> Array.fromList
-            |> Array.get (model.currentQuestion - 1)
-    of
-        Just q ->
-            case
-                model.questionsToAnswer
-                    |> Array.fromList
-                    |> Array.get q
-            of
-                Nothing ->
-                    QuestionToAnswer "empty" "empty" "empty" "empty" "empty" "empty"
 
-                Just val ->
-                    val
-
-        Nothing ->
-            QuestionToAnswer "empty" "empty" "empty" "empty" "empty" "empty"
+--extractQuestions : Quiz -> QuestionToAnswer
+--extractQuestions quiz =
+--    case
+--        quiz.questions
+--            |> Array.fromList
+--            |> Array.get (quiz.currentQuestion - 1)
+--    of
+--        Just q ->
+--            case
+--                quiz.questionsToAnswer
+--                    |> Array.fromList
+--                    |> Array.get q
+--            of
+--                Nothing ->
+--                    QuestionToAnswer "empty" "empty" "empty" "empty" "empty" "empty"
+--                Just val ->
+--                    val
+--        Nothing ->
+--            QuestionToAnswer "empty" "empty" "empty" "empty" "empty" "empty"
