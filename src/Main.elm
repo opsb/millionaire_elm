@@ -53,17 +53,22 @@ subscriptions model =
 
 type Msg
     = AnswerClicked Answer
-    | QuizBuilt Quiz
+    | QuizBuilt (Result String Quiz)
     | CloseModalClicked
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case ( msg, model ) of
-        ( QuizBuilt quiz, BuildingQuiz allQuestions ) ->
-            ( PlayingQuiz allQuestions quiz
-            , Cmd.none
-            )
+        ( QuizBuilt quizResult, BuildingQuiz allQuestions ) ->
+            case quizResult of
+                Ok quiz ->
+                    ( PlayingQuiz allQuestions quiz
+                    , Cmd.none
+                    )
+
+                Err message ->
+                    ( InvalidQuestions, Cmd.none )
 
         ( AnswerClicked ans, PlayingQuiz allQuestions quiz ) ->
             if Quiz.isCorrect ans quiz then
@@ -143,14 +148,9 @@ quizView quiz =
             , div [ class "row" ]
                 [ lifeLineSection
                 ]
-            , case Quiz.currentQuestion quiz of
-                Just question ->
-                    div [ class "row" ]
-                        [ answerSection question
-                        ]
-
-                Nothing ->
-                    text ""
+            , div [ class "row" ]
+                [ answerSection (Quiz.currentQuestion quiz)
+                ]
             ]
         ]
 
@@ -185,7 +185,7 @@ prizeBadge quiz questionIndex =
         [ classList
             [ ( "row", True )
             , ( "prize", True )
-            , ( "current-prize", quiz.currentQuestion == questionIndex )
+            , ( "current-prize", Quiz.currentIndex quiz == questionIndex )
             , ( "_" ++ String.fromInt questionIndex, True )
             ]
         ]

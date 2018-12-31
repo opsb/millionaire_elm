@@ -1,4 +1,17 @@
-module Quiz exposing (Answer(..), Question, Quiz, QuizState(..), advance, build, currentPrizeMoney, currentQuestion, isCorrect, prizeMoney, questionDecoder)
+module Quiz exposing
+    ( Answer(..)
+    , Question
+    , Quiz
+    , QuizState(..)
+    , advance
+    , build
+    , currentIndex
+    , currentPrizeMoney
+    , currentQuestion
+    , isCorrect
+    , prizeMoney
+    , questionDecoder
+    )
 
 import Dict exposing (Dict)
 import Json.Decode as JD exposing (Decoder, array, decodeValue, field, list, map6, string)
@@ -8,8 +21,9 @@ import Random.List
 
 
 type alias Quiz =
-    { currentQuestion : Int
-    , questions : List Question
+    { before : List Question
+    , current : Question
+    , after : List Question
     , state : QuizState
     }
 
@@ -37,7 +51,7 @@ type Answer
     | D
 
 
-build : (Quiz -> msg) -> List Question -> Cmd msg
+build : (Result String Quiz -> msg) -> List Question -> Cmd msg
 build tagger questions =
     questions
         |> Random.List.shuffle
@@ -46,36 +60,48 @@ build tagger questions =
         |> Random.generate tagger
 
 
-init : List Question -> Quiz
+init : List Question -> Result String Quiz
 init questions =
-    { currentQuestion = 0
-    , questions = questions
-    , state = Playing
-    }
+    case questions of
+        [] ->
+            Err "no questions available"
+
+        first :: others ->
+            Ok
+                { before = []
+                , current = first
+                , after = others
+                , state = Playing
+                }
+
+
+length : Quiz -> Int
+length quiz =
+    List.length quiz.before + 1 + List.length quiz.after
 
 
 advance : Quiz -> Quiz
 advance quiz =
-    if quiz.currentQuestion == List.length quiz.questions then
+    if currentIndex quiz == length quiz then
         { quiz | state = Won }
 
     else
-        { quiz | currentQuestion = quiz.currentQuestion + 1 }
+        case quiz.after of
+            [] ->
+                quiz
+
+            head :: rest ->
+                { quiz | before = quiz.before ++ [ quiz.current ], current = head, after = rest }
 
 
 isCorrect : Answer -> Quiz -> Bool
 isCorrect ans quiz =
-    case currentQuestion quiz of
-        Just question ->
-            question.answer == ans
-
-        Nothing ->
-            False
+    quiz.current.answer == ans
 
 
-currentQuestion : Quiz -> Maybe Question
+currentQuestion : Quiz -> Question
 currentQuestion quiz =
-    List.Extra.getAt quiz.currentQuestion quiz.questions
+    quiz.current
 
 
 questionDecoder : Decoder Question
@@ -121,7 +147,12 @@ prizeMoney questionIndex =
 
 currentPrizeMoney : Quiz -> Float
 currentPrizeMoney quiz =
-    prizeMoney quiz.currentQuestion
+    quiz |> currentIndex |> prizeMoney
+
+
+currentIndex : Quiz -> Int
+currentIndex quiz =
+    List.length quiz.before + 1
 
 
 prizes : Dict Int Float
