@@ -138,16 +138,36 @@ answerDecoder =
             )
 
 
+currentPrizeMoney : Quiz -> Float
+currentPrizeMoney quiz =
+    case quiz.state of
+        Lost ->
+            lostPrizeMoney (currentIndex quiz)
+
+        _ ->
+            prizeMoney (currentIndex quiz)
+
+
+lostPrizeMoney : Int -> Float
+lostPrizeMoney questionIndex =
+    if questionIndex < 5 then
+        100
+
+    else if questionIndex < 10 then
+        1000
+
+    else if questionIndex < 15 then
+        32000
+
+    else
+        1000000
+
+
 prizeMoney : Int -> Float
 prizeMoney questionIndex =
     prizes
         |> Dict.get questionIndex
         |> Maybe.withDefault 0
-
-
-currentPrizeMoney : Quiz -> Float
-currentPrizeMoney quiz =
-    quiz |> currentIndex |> prizeMoney
 
 
 currentIndex : Quiz -> Int
